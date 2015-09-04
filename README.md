@@ -3,6 +3,17 @@ Slackボット作成に便利なツールキットです。
 
 ## How to install?
 
+
+
+グローバルインストール
+```
+npm install -g slack_botkit
+
+#-- usage --
+# slack post \#hoge_channel some message
+```
+
+環境を汚さずインストールしたい方は、ローカルインストールも一応できます
 ```
 cd path/anywhere
 
@@ -12,6 +23,8 @@ cd node_modules/slack_botkit
 #-- usage --
 # ./slack post \#hoge_channel some message
 ```
+
+
 
 ## Configure
 
