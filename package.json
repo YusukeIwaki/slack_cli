@@ -1,0 +1,36 @@
+{
+    "name": "slack_botkit",
+    "version": "0.0.1",
+    "description": "Command Line Slack interface, convenient for BOT message.",
+    "main": "index.js",
+    "dependencies": {
+        "mootools":"*",
+        "string.prototype.startswith":"*",
+        "string.prototype.endswith":"*",
+
+        "sudden-death":"*",
+  
+        "websocket": "*",
+        "request": "*",
+        "promise": "*",
+        "stdio": "*",
+        "argparse": "*"
+    },
+    "scripts": {
+      "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/YusukeIwaki/slack_cli.git"
+    },
+    "keywords": [
+      "slack",
+      "cli",
+      "botkit"
+    ],
+     "bin": {
+      "slack": "slack"
+    },
+    "author": "Yusuke Iwaki",
+    "license": "MIT"
+}

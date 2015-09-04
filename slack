@@ -1,0 +1,509 @@
+#!/usr/bin/env node
+
+"use strict";
+
+require("mootools");
+require("string.prototype.startswith");
+require("string.prototype.endswith");
+
+var Request = require('request');
+var WebSocket = require("websocket");
+var Promise = require('promise');
+var ArgParse = require('argparse').ArgumentParser;
+
+
+
+// 引数の標準化
+
+var argv = Array.clone(process.argv);
+while(true){
+    var a = argv.shift();
+    if (a===undefined || a==__filename || a.endsWith(".js")) break;
+}
+if (argv.length == 0) {
+    argv = Array.clone(process.argv);
+    argv.shift();
+}
+
+
+
+// 引数のフォーマット定義
+
+function channel_name(channel){
+    if (!channel.startsWith("#")) throw TypeError();
+    return channel;
+}
+
+function emoji_name(emojistr){
+    var emoji = emojistr;
+    if (emojistr.startsWith(":")) emoji = emoji.substring(1);
+    if (emojistr.endsWith(":")) emoji = emoji.substring(0,emoji.length-1);
+    return emoji;
+}
+
+function js_file(filename){
+    if(!filename.endsWith(".js")) throw TypeError();
+
+    var cb = require("./"+filename);
+    if(typeOf(cb.handleMessage)=="function"){
+        return cb.handleMessage;
+    }
+    else throw TypeError("Invalid callback filename:", filename);
+}
+
+function attach_common_logic(parser){
+    parser.addArgument(["--token"],{
+        nargs: "?",
+        help: "Slack API token",
+        defaultValue: process.env.SLACK_API_TOKEN,
+    }); 
+    return parser;
+}
+
+
+var me = require('./package.json');
+var parser = new ArgParse({
+    version: me.version,
+    description: me.description,
+});
+
+
+var subParsers = parser.addSubparsers({
+    dest: "subcommand"
+});
+
+var parserObserve = subParsers.addParser("observe", {
+    help: "Slack RTMを用いて特定のチャンネルの監視をします",
+});
+attach_common_logic(parserObserve);
+parserObserve.addArgument(["-e", "--exec", "--callback"],{
+    nargs: 1,
+    action: "append",
+    type: js_file,
+    dest: "callback",
+    help: "コールバック関数を定義したJavaScriptモジュールファイル",
+}); 
+parserObserve.addArgument(["channels"], {
+    nargs: "+",
+    type: channel_name,
+    help:"監視するチャンネル",
+});
+
+parserObserve.setDefaults({
+    validate: function (){
+        if (typeOf(this.token)=="null") {
+            parser.printHelp();
+            throw new TypeError("token is not given.");
+        }
+        if (typeOf(this.callback)=="array"){
+            this.callback = this.callback.map(function(cb){
+                if (typeOf(cb)=="array" && typeOf(cb[0])=="function") return cb[0];
+                else if(typeOf(cb)=="function") return cb;
+                else throw new TypeError();
+            });
+        }
+    }
+});
+
+var parserPost = subParsers.addParser("post",{
+    help: "SlackのcharMessage APIをつかってBOTとして発言します。",
+});
+attach_common_logic(parserPost);
+parserPost.addArgument(["-u","--username"],{
+    nargs: "?",
+    help: "ユーザの名前",
+    defaultValue: process.env.SLACK_API_USER,
+});
+parserPost.addArgument(["--icon"],{
+    nargs: "?",
+    help: "投稿時に使用するアイコン",
+}); 
+parserPost.addArgument(["channel"], {
+    nargs: 1,
+    type: channel_name,
+    help: "投稿するチャンネル",
+});
+parserPost.addArgument(["messages"], {
+    nargs: "*",
+    help: "メッセージ"
+});
+
+parserPost.setDefaults({
+    validate: function (){
+        //console.log(typeof(this))
+        if (typeOf(this.username)=="null") {
+            parser.printHelp();
+            throw new TypeError("userID is not given.");
+        }
+        if (typeOf(this.token)=="null") {
+            parser.printHelp();
+            throw new TypeError("token is not given.");
+        }
+
+        if (typeOf(this.channel)=="array") {
+            this.channel = this.channel[0];
+        }
+    }
+});
+
+
+var parserReaction = subParsers.addParser("reaction",{
+    help: "Slackの特定のチャンネルにreactionを追加します",
+});
+attach_common_logic(parserReaction);
+parserReaction.addArgument(["-t", "--timestamp"], {
+    nargs: "?",
+    help: "リアクションをつけるメッセージのタイムスタンプ",
+})
+parserReaction.addArgument(["channel"], {
+    nargs: 1,
+    type: channel_name,
+    help: "投稿するチャンネル",
+});
+parserReaction.addArgument(["emoji"], {
+    nargs: "+",
+    help: "絵文字",
+});
+parserReaction.setDefaults({
+    validate: function (){
+        //console.log(typeof(this))
+        if (typeOf(this.token)=="null") {
+            parser.printHelp();
+            throw new TypeError("token is not given.");
+        }
+
+        if (typeOf(this.channel)=="array") {
+            this.channel = this.channel[0];
+        }
+    }
+});
+
+
+var params = parser.parseArgs(argv);
+params.validate();
+
+console.log("CLI params =>",params)
+
+// Slackの実装
+
+function post(api_token, targetChannel, message, username, usericon, attachments){
+    var param = {
+        token: api_token
+        , channel: targetChannel
+        , text: message
+        , as_user: false//bot
+        , parse: "full"
+        , link_names: 1
+        , unfurl_links: true
+        , unfurl_media: true
+    };
+    if(typeOf(username)=="string" && username.length>0) param["username"]=username;
+    if(typeOf(usericon)=="string" && usericon.length>0) param["icon_url"]=usericon;
+    if(typeOf(attachments)=="string" && attachments.length>0) param["attachments"]=attachments;
+    Request.post('https://slack.com/api/chat.postMessage',{form: param}, function (err, res, body) {
+        if (!err && res.statusCode == 200) {
+            console.log(body);
+        } else {
+            console.log(body);
+        }   
+    });
+}
+
+function emptyTask(){
+    return new Promise(function (resolve, reject){ resolve(); });
+}
+
+function reaction(api_token, emoji, targetChannel, targetTimestamp) {
+    if(typeOf(emoji)=="array"){
+        if(emoji.length==0) return emptyTask();
+
+        var _emoji = Array.clone(emoji);
+        var e = _emoji.shift();
+        var nextReaction = function (o){
+            if(o["__reaction_param"]){
+                var param = o["__reaction_param"];
+                if (param["channel"] && param["channel"].startsWith("C")) targetChannel = param["channel"];
+                if (param["timestamp"]) targetTimestamp = param["timestamp"];
+            }
+            return reaction(api_token, _emoji, targetChannel, targetTimestamp);
+        };
+
+        return reaction(api_token, e, targetChannel, targetTimestamp)
+                .then(nextReaction,nextReaction);//成功しても失敗してもNext
+    }
+    if(typeOf(emoji)!="string"){
+        throw Error("emoji is not string.");
+    }
+
+    var param = {
+        token: api_token,
+        name: emoji_name(emoji),
+        channel: targetChannel
+    };
+    if(typeOf(targetTimestamp)=="string") param["timestamp"]=targetTimestamp;
+
+    return new Promise(function(resolve, reject){
+        if (typeOf(param["channel"])=="string" && param["channel"].startsWith("#")){
+            Request('https://slack.com/api/channels.list?token='+params.token, function (error, response, body) {
+                    if (!error && response.statusCode == 200) {
+                        var json = JSON.parse(body);
+                        if(!json["ok"]) {
+                            reject(json["error"]);
+                            return;
+                        }
+
+                        var result = json["channels"].filter(function(channel){
+                            return (channel["name"]==param["channel"].substring(1));
+                        });
+                        if (result.length!=1) reject("no channel "+targetChannel+ " found.");
+
+                        resolve(result[0]["id"]);                        
+                    }
+                    else{
+                        reject(response);
+                    }
+                });
+        }
+        else resolve(false);
+    }).then(function /*onSuccess*/(channel){
+        if(channel) param["channel"]=channel;
+
+        return new Promise(function(resolve, reject){
+            if (param["timestamp"]) {
+                resolve(false);
+                return;
+            }
+            Request('https://slack.com/api/channels.history?token='+params.token+'&channel='+param["channel"], function (error, response, body) {
+                if (!error && response.statusCode == 200) {
+                    var json = JSON.parse(body);
+                    if(!json["ok"]) {
+                        reject(json["error"]);
+                        return;
+                    }
+
+                    if(!json["messages"] || json["messages"].length==0) {
+                        reject()
+                        return;
+                    }
+
+                    resolve(json["messages"][0]["ts"]);                        
+                }   
+                else{
+                    reject(response);
+                }
+            });
+        });
+    }).then(function /*onSuccess*/(timestamp){
+        if(timestamp) param["timestamp"]=timestamp;
+
+        return new Promise(function(resolve, reject){
+            Request.post('https://slack.com/api/reactions.add',{form: param}, function (err, res, body) {
+                if (!err && res.statusCode == 200) {
+                    var json = JSON.parse(body);
+                    if(!json["ok"]) {
+                        reject(json["error"]);
+                        return;
+                    }
+                    json["__reaction_param"]=param;
+
+                    resolve(json);
+                } else {
+                    reject(body);
+                }   
+            });
+
+        });
+
+    }, function /*onError*/(err){
+        console.log("Error! > "+err);
+    });
+}
+
+function printJS(json){
+    console.log(">", json);
+}
+
+
+var RTM = new Class({
+    initialize: function(api_token){
+        this.token = api_token;
+    }
+    , init: function(){
+        var token = this.token;
+        return new Promise(function(resolve, reject){
+            Request('https://slack.com/api/rtm.start?token='+token, function (error, response, body) {
+                if (!error && response.statusCode == 200) {
+                    resolve(JSON.parse(body));
+                }
+                else{
+                    reject(response);
+                }
+            });
+        });          
+    }
+    , connect: function(wsurl){
+        return new Promise(function(resolve, reject){
+            var client = new WebSocket.client();
+
+            client.on("connectFailed", function(error){
+                reject(error);
+            })
+            client.on("connect", function(connection){
+                resolve(connection);
+            });
+
+            client.connect(wsurl);        
+        });
+    }
+});
+
+var Slack = new Class({
+    initialize: function(){
+        this.invChannels = {};
+        this.channels = {};
+
+        this.invUsers = {};
+        this.users = {};
+
+        this.regChannels = new Array();
+    }
+    , registerChannels: function(channelNames){
+        var self = this;
+        channelNames.forEach(function(channelName){
+            if(!self.regChannels.contains(channelName)){
+                self.regChannels.push(channelName);
+            }
+        });
+    }
+    , handleRTMJSON: function(json){
+        var self = this;
+        json["channels"].forEach(function(channel){
+            self.channels[channel["id"]] = {
+                id: channel["id"],
+                name: "#"+channel["name"]
+            };
+            self.invChannels[channel["name"]] = channel["id"];
+        });
+
+        json["users"].forEach(function(user){
+            self.handleUserJoined(user);
+        });
+    }
+    , handleUserJoined: function(user){
+        this.users[user["id"]] = {
+            id: user["id"],
+            name: user["name"],
+            icon: user["profile"]["image_original"]
+        };
+        this.invUsers[user["name"]] = user["id"];
+    }
+    , handleUserLeft: function(userid){
+        var username = this.users[userid].name;
+        delete this.users[userid];
+        delete this.invUsers[username];
+    }
+    , handleMessageJSON: function(json, callback){
+        if(json["user"] && this.users[json["user"]]){
+            json["user"]=this.users[json["user"]];
+        }
+        if(json["channel"] && this.channels[json["channel"]]){
+            json["channel"]=this.channels[json["channel"]];
+
+            // 監視対象ではないチャネルのイベントは捨てる
+            if(this.regChannels.length>0 && !this.regChannels.contains(json["channel"]["name"])) return;
+        }
+
+        if (typeOf(callback)=="function"){
+            callback(json);
+        }
+        else{
+            printJS(json);
+        }  
+    }
+})
+
+var Param = new Class({
+    initialize:function(token){
+        this.token = token;
+        this.post = post;
+        this.reaction = reaction;
+        this.printJS = printJS;
+    }
+})
+
+//-------------------------------------
+
+if(params.subcommand=="post"){
+    (new Promise(function(resolve, reject){
+        var message = (params.messages.length==0)? "___STDIN___" : params.messages.join(" ");
+
+        if(message.contains("___STDIN___")){
+            var messages = new Array();
+            //標準入力から
+            process.stdin.resume();
+            process.stdin.setEncoding('utf8');
+
+            process.stdin.on('data', function (chunk) {
+                messages.push(chunk);
+            });
+
+            process.stdin.on('end', function () {
+                resolve(message.replace(/___STDIN___/g,messages.join("\n")));
+            });
+        }
+        else{
+            resolve(message);
+        }
+
+    })).then(function /*onSuccess*/(message){
+        post(params.token, params.channel, message, params.username, params.icon);
+    });
+
+
+}
+else if(params.subcommand=="reaction"){
+    reaction(params.token, params.emoji, params.channel, params.timestamp);
+}
+else if(params.subcommand=="observe"){
+    var rtm = new RTM(params.token);
+    var slack = new Slack();
+    slack.registerChannels(params.channels);
+
+    rtm.init().then(function /*onSuccess*/(json){
+        slack.handleRTMJSON(json);
+        var wsurl = json["url"];
+
+        return rtm.connect(wsurl);
+    })
+    .then(function /*onSuccess*/(connection){
+        connection.on("close", function(){
+            //console.log("Connection Closed");
+            process.exit(1);
+        });
+
+        connection.on("error", function(error){
+            //console.log("Connection Error: " + error.toString());
+            process.exit(1);
+        });
+
+        connection.on('message', function(message) {
+            if (message.type === 'utf8') {
+                var callback=function(json){
+                    if(typeOf(params.callback)=="array" && params.callback.length>0){
+                        params.callback.forEach(function(cb){
+                            cb(json,new Param(params.token));
+                        });
+                    }
+                    else{
+                        printJS(json);
+                    }
+                };
+                slack.handleMessageJSON(JSON.decode(message.utf8Data), callback);
+            }
+        });
+
+    }, function /*onError*/(err){
+        console.log(err);
+    });
+
+}
