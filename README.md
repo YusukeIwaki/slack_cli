@@ -26,7 +26,7 @@ APIトークンは [このへん](https://api.slack.com/web) から取得して�
 
 Hello
 ```
-slack post \#hoge_channel --username=hogehogebot こんにちは！ hogehoge bot です！
+slack post --username=hogehogebot \#hoge_channel こんにちは！ hogehoge bot です！
 ```
 
 
