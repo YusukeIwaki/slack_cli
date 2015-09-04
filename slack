@@ -10,7 +10,7 @@ var Request = require('request');
 var WebSocket = require("websocket");
 var Promise = require('promise');
 var ArgParse = require('argparse').ArgumentParser;
-
+var Path = require('path');
 
 
 // 引数の標準化
@@ -18,7 +18,7 @@ var ArgParse = require('argparse').ArgumentParser;
 var argv = Array.clone(process.argv);
 while(true){
     var a = argv.shift();
-    if (a===undefined || a==__filename || a.endsWith(".js")) break;
+    if (a===undefined || Path.basename(a)==Path.basename(__filename) || a.endsWith(".js")) break;
 }
 if (argv.length == 0) {
     argv = Array.clone(process.argv);
