@@ -1,6 +1,6 @@
 {
     "name": "slack_botkit",
-    "version": "0.0.1",
+    "version": "0.1.0",
     "description": "Command Line Slack interface, convenient for BOT message.",
     "main": "index.js",
     "dependencies": {
