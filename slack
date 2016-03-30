@@ -56,7 +56,7 @@ function attach_common_logic(parser){
         nargs: "?",
         help: "Slack API token",
         defaultValue: process.env.SLACK_API_TOKEN,
-    }); 
+    });
     return parser;
 }
 
@@ -82,7 +82,7 @@ parserObserve.addArgument(["-e", "--exec", "--callback"],{
     type: js_file,
     dest: "callback",
     help: "コールバック関数を定義したJavaScriptモジュールファイル",
-}); 
+});
 parserObserve.addArgument(["channels"], {
     nargs: "+",
     type: channel_name,
@@ -117,7 +117,7 @@ parserPost.addArgument(["-u","--username"],{
 parserPost.addArgument(["--icon"],{
     nargs: "?",
     help: "投稿時に使用するアイコン",
-}); 
+});
 parserPost.addArgument(["channel"], {
     nargs: 1,
     type: channel_name,
@@ -198,14 +198,17 @@ function post(api_token, targetChannel, message, username, usericon, attachments
         , unfurl_media: true
     };
     if(typeOf(username)=="string" && username.length>0) param["username"]=username;
-    if(typeOf(usericon)=="string" && usericon.length>0) param["icon_url"]=usericon;
+    if(typeOf(usericon)=="string" && usericon.length>0) {
+      if (usericon.startsWith(":") && usericon.endsWith(":")) param["icon_emoji"]=usericon;
+      else param["icon_url"]=usericon;
+    }
     if(typeOf(attachments)=="string" && attachments.length>0) param["attachments"]=attachments;
     Request.post('https://slack.com/api/chat.postMessage',{form: param}, function (err, res, body) {
         if (!err && res.statusCode == 200) {
             console.log(body);
         } else {
             console.log(body);
-        }   
+        }
     });
 }
 
@@ -257,7 +260,7 @@ function reaction(api_token, emoji, targetChannel, targetTimestamp) {
                         });
                         if (result.length!=1) reject("no channel "+targetChannel+ " found.");
 
-                        resolve(result[0]["id"]);                        
+                        resolve(result[0]["id"]);
                     }
                     else{
                         reject(response);
@@ -286,8 +289,8 @@ function reaction(api_token, emoji, targetChannel, targetTimestamp) {
                         return;
                     }
 
-                    resolve(json["messages"][0]["ts"]);                        
-                }   
+                    resolve(json["messages"][0]["ts"]);
+                }
                 else{
                     reject(response);
                 }
@@ -309,7 +312,7 @@ function reaction(api_token, emoji, targetChannel, targetTimestamp) {
                     resolve(json);
                 } else {
                     reject(body);
-                }   
+                }
             });
 
         });
@@ -339,7 +342,7 @@ var RTM = new Class({
                     reject(response);
                 }
             });
-        });          
+        });
     }
     , connect: function(wsurl){
         return new Promise(function(resolve, reject){
@@ -352,7 +355,7 @@ var RTM = new Class({
                 resolve(connection);
             });
 
-            client.connect(wsurl);        
+            client.connect(wsurl);
         });
     }
 });
@@ -412,13 +415,19 @@ var Slack = new Class({
             // 監視対象ではないチャネルのイベントは捨てる
             if(this.regChannels.length>0 && !this.regChannels.contains(json["channel"]["name"])) return;
         }
+        if(json["item"] && json["item"]["channel"]) {
+          var channel=this.channels[json["item"]["channel"]];
+
+          // 監視対象ではないチャネルのイベントは捨てる
+          if(this.regChannels.length>0 && channel && channel["name"] && !this.regChannels.contains(channel["name"])) return;
+        }
 
         if (typeOf(callback)=="function"){
             callback(json);
         }
         else{
             printJS(json);
-        }  
+        }
     }
 })
 
